@@ -5,133 +5,124 @@ from io import StringIO
 from datetime import datetime, timedelta
 
 # --- CONFIG ---
-st.set_page_config(page_title="Hybrid Pro Coach AI", layout="wide")
+st.set_page_config(page_title="Hybrid Coach Pro", layout="wide")
 
-# --- INITIALISATIE ---
+# --- CSS VOOR UI ---
+st.markdown("""
+<style>
+    .reportview-container { background: #f0f2f6; }
+    .stMetric { background-color: #ffffff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .training-card { background-color: #e1f5fe; padding: 15px; border-radius: 10px; border-left: 5px solid #0288d1; margin-bottom: 10px; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- DATA INITIALISATIE ---
 if 'logs' not in st.session_state:
     st.session_state.logs = pd.DataFrame(columns=['Datum', 'Type', 'KM', 'Duur', 'HR', 'RunningIndex', 'Pijn', 'Gewicht'])
 
-# --- SIDEBAR ---
-st.sidebar.header("🛡️ Coach Settings")
-curr_weight = st.sidebar.number_input("Gewicht (kg)", value=76.0)
-target_ri = 65 # Target voor Sub-18 5K
+# --- SIDEBAR: COACH SETTINGS ---
+st.sidebar.header("🛡️ Persoonlijk Profiel")
+weight = st.sidebar.number_input("Gewicht (kg)", value=76.0)
+hr_max = 190
+hr_rest = 51
 
-# --- CALCULATIE FUNCTIES ---
-def calculate_race_times(ri):
-    # Formules gebaseerd op Daniels/Polar data mapping
-    if ri == 0: return None
-    vdot = ri # RI is een goede proxy voor VDOT
-    times = {
-        "5K": 480 / (ri * 0.08), # Simpele lineaire benadering
-        "10K": 1000 / (ri * 0.08),
-        "Marathon": 4500 / (ri * 0.08)
-    }
-    # Verfijning (RI 57 ~ 19:15, RI 65 ~ 17:30)
-    five_k_mins = 26 - (0.12 * ri * 1.5) # Empirische curve
-    return {
-        "5K": str(timedelta(minutes=26 - (ri-50)*0.45))[:7],
-        "10K": str(timedelta(minutes=54 - (ri-50)*0.95))[:7],
-        "Marathon": str(timedelta(minutes=220 - (ri-50)*4.2))[:7]
-    }
+# --- BEREKEN ZONES ---
+hrr = hr_max - hr_rest
+zones = {
+    "Zone 1 (Herstel)": f"{int(hr_rest + 0.50*hrr)} - {int(hr_rest + 0.60*hrr)} bpm",
+    "Zone 2 (Aerobe Basis)": f"{int(hr_rest + 0.60*hrr)} - {int(hr_rest + 0.70*hrr)} bpm",
+    "Zone 3 (Tempo)": f"{int(hr_rest + 0.70*hrr)} - {int(hr_rest + 0.80*hrr)} bpm",
+    "Zone 4 (Threshold)": f"{int(hr_rest + 0.80*hrr)} - {int(hr_rest + 0.90*hrr)} bpm"
+}
 
-def get_training_paces(ri):
-    # Zone 2 tempo: ~70-75% van 5k tempo
-    # Threshold tempo: ~88-92% van 5k tempo
-    base_pace_sec = (26 - (ri-50)*0.45) * 60 / 5
-    z2_pace = base_pace_sec * 1.35
-    threshold_pace = base_pace_sec * 1.08
-    return {
-        "Zone 2 (Easy)": f"{int(z2_pace//60)}:{int(z2_pace%60):02d} min/km",
-        "Threshold": f"{int(threshold_pace//60)}:{int(threshold_pace%60):02d} min/km"
-    }
+# --- TABS ---
+tab_coach, tab_plan, tab_prog, tab_data = st.tabs(["🚀 Daily Coach", "📅 Programma", "📈 Analyse", "📂 Data"])
 
-# --- PARSER ---
-def parse_polar(file):
-    stringio = StringIO(file.getvalue().decode("utf-8"))
-    df_raw = pd.read_csv(stringio, skiprows=0)
-    ri = df_raw.iloc[0]['Running index']
-    return {
-        'Datum': df_raw.iloc[0]['Date'],
-        'Type': df_raw.iloc[0]['Sport'],
-        'KM': round(float(df_raw.iloc[0]['Total distance (km)']), 2),
-        'Duur': df_raw.iloc[0]['Duration'],
-        'HR': int(df_raw.iloc[0]['Average heart rate (bpm)']),
-        'RunningIndex': int(ri) if pd.notnull(ri) else 0,
-        'Pijn': 0, 'Gewicht': curr_weight
-    }
-
-# --- UI ---
-st.title("🚀 Wladimir's AI Hybrid Coach")
-
-tabs = st.tabs(["🎯 Voorspellingen", "📈 Progressie", "📅 Plan", "💪 Kracht", "📂 Data"])
-
-# Bereken gemiddelde RI van de laatste 5 runs
-runs = st.session_state.logs[st.session_state.logs['Type'] == 'RUNNING']
-current_ri = runs['RunningIndex'].tail(5).mean() if not runs.empty else 57.0
-
-with tabs[0]:
-    st.header("🏁 Race Voorspellingen & Tempo's")
-    col1, col2 = st.columns(2)
+with tab_coach:
+    st.header(f"Training voor {datetime.now().strftime('%A %d %B')}")
+    
+    col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("Jouw Huidige Potentie")
-        st.write(f"Gebaseerd op Running Index: **{current_ri:.1f}**")
-        preds = calculate_race_times(current_ri)
-        st.metric("5K Race (Nu)", preds["5K"])
-        st.metric("10K Race (Nu)", preds["10K"])
-        st.metric("Marathon (Nu)", preds["Marathon"])
-
-    with col2:
-        st.subheader("Target: Sub-18 min 5K")
-        ri_gap = target_ri - current_ri
-        weeks_needed = int(ri_gap / 0.3) # Gemiddelde RI winst van 0.3 per week
-        st.metric("Weken tot Sub-18", f"± {weeks_needed} weken")
+        st.markdown(f"""
+        <div class="training-card">
+            <h3>🏃‍♂️ Lydiard Aerobe Opbouw (Achilles Safe)</h3>
+            <p><b>Focus:</b> Zone 2 Endurance</p>
+            <p><b>Protocol:</b> 9:1 Run-Walk (9 min lopen, 1 min wandelen)</p>
+            <p><b>Afstand:</b> 8.0 - 8.8 km (Blijf binnen 10% groei)</p>
+            <p><b>Hartslag Target:</b> {zones['Zone 2 (Aerobe Basis)']}</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        st.write("**Jouw Trainingstempo's:**")
-        paces = get_training_paces(current_ri)
-        for zone, pace in paces.items():
-            st.info(f"**{zone}:** {pace}")
+    with col2:
+        st.subheader("HR Zone Dashboard")
+        for zone, range_bpm in zones.items():
+            st.write(f"**{zone}:** `{range_bpm}`")
 
-with tabs[1]:
-    st.header("Analyse & Trends")
-    if not runs.empty:
-        fig = px.line(runs, x='Datum', y='RunningIndex', title='Conditie Groei (Running Index)')
-        st.plotly_chart(fig, use_container_width=True)
+with tab_plan:
+    st.header("📅 Trainingsschema")
+    period = st.radio("Overzicht per:", ["Week", "Maand"], horizontal=True)
+    
+    # Voorbeeld schema data
+    schema_weekly = pd.DataFrame({
+        "Dag": ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"],
+        "Sessie": ["🚲 Fiets Herstel (45m)", "🏃 8km Lydiard Run", "💪 Kracht A", "🏃 6km Lydiard Run", "🚲 Fiets Herstel (45m)", "🏃 10km Lange Loop", "💪 Kracht B"],
+        "Zone": ["Zone 1", "Zone 2", "Power", "Zone 2", "Zone 1", "Zone 2", "Mobility"]
+    })
+    
+    if period == "Week":
+        st.table(schema_weekly)
     else:
-        st.write("Upload runs om progressie te zien.")
+        st.info("Maandoverzicht: Focus op accumulatie van Zone 2 uren. Target: 100km lopen + 200km fietsen per maand.")
 
-with tabs[2]:
-    st.header("Lydiard 24-Weken Roadmap")
-    st.write(f"Huidige Status: **Week {24-weeks_needed if weeks_needed < 24 else 1}**")
+with tab_prog:
+    st.header("📈 Progressie & AI Predictions")
     
-    phase = "Aerobe Basis" if weeks_needed > 12 else "Heuvel Fase"
-    st.success(f"Huidige Fase: **{phase}**")
+    # Bereken gemiddelde RI
+    runs = st.session_state.logs[st.session_state.logs['Type'] == 'RUNNING']
+    current_ri = runs['RunningIndex'].tail(5).mean() if not runs.empty else 57.0
     
-    st.table(pd.DataFrame({
-        "Fase": ["Aerobe Basis", "Heuvel Kracht", "Anaerobe Fase", "Taper"],
-        "Duur": ["12-16 weken", "4 weken", "4 weken", "2 weken"],
-        "Focus": ["Volume & Hart", "Pezen & Kracht", "Snelheid", "Frisheid"]
-    }))
+    col_p1, col_p2, col_p3 = st.columns(3)
+    
+    # 5K Predictor
+    pred_5k = 26 - (current_ri - 50) * 0.5
+    col_p1.metric("Huidige 5K Potentie", f"{int(pred_5k)}:{(pred_5k%1*60):02.0f} min")
+    
+    # Marathon Shape (Gebaseerd op verste loop van 8km)
+    marathon_foundation = (8 / 32) * 100 # 32km is de Lydiard standaard voor Sub-3 training
+    col_p2.metric("Marathon Fundering", f"{marathon_foundation:.1f}%", help="Hoeveel % van de benodigde duurkracht heb je?")
+    
+    # Achilles Trend
+    avg_pain = st.session_state.logs['Pijn'].tail(5).mean() if not st.session_state.logs.empty else 0
+    col_p3.metric("Achilles Stabiliteit", f"{10-avg_pain}/10")
 
-with tabs[3]:
-    st.header("Hyrox & Home Gym")
-    st.write("Jouw uitrusting is ideaal voor 'Concurrent Training'.")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.subheader("Sessie A")
-        st.write("1. Single Leg RDL (20kg)")
-        st.write("2. Goblet Squat (20kg)")
-        st.write("3. Isometric Calf Raise (3x45s)")
-    with col_b:
-        st.subheader("Mobiliteit")
-        st.write("Focus op Dorsiflexie (Board)")
-        st.write("Hip Hinge flow")
+    if not runs.empty:
+        st.subheader("Conditie Verloop (Running Index)")
+        fig = px.area(runs, x='Datum', y='RunningIndex', title="VO2max Trend (Lydiard Engine)")
+        st.plotly_chart(fig, use_container_width=True)
 
-with tabs[4]:
-    uploaded = st.file_uploader("Upload Polar CSV", type="csv")
+with tab_data:
+    st.header("📂 Data Import")
+    uploaded = st.file_uploader("Sleep je Polar CSV hierheen", type="csv")
     if uploaded:
-        data = parse_polar(uploaded)
-        if st.button("Opslaan"):
+        stringio = StringIO(uploaded.getvalue().decode("utf-8"))
+        df_raw = pd.read_csv(stringio)
+        
+        # Pak data
+        ri = df_raw.iloc[0]['Running index']
+        data = {
+            'Datum': df_raw.iloc[0]['Date'],
+            'Type': df_raw.iloc[0]['Sport'],
+            'KM': round(float(df_raw.iloc[0]['Total distance (km)']), 2),
+            'Duur': df_raw.iloc[0]['Duration'],
+            'HR': int(df_raw.iloc[0]['Average heart rate (bpm)']),
+            'RunningIndex': int(ri) if pd.notnull(ri) else 0,
+            'Pijn': st.session_state.get('last_pain', 0),
+            'Gewicht': weight
+        }
+        if st.button("Sessie opslaan"):
             st.session_state.logs = pd.concat([st.session_state.logs, pd.DataFrame([data])], ignore_index=True)
-            st.success("Data verwerkt!")
-    st.dataframe(st.session_state.logs)
+            st.success("Training opgeslagen!")
+            
+    st.subheader("Trainingslogboek")
+    st.dataframe(st.session_state.logs.sort_values('Datum', ascending=False), use_container_width=True)
