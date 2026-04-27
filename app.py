@@ -5,130 +5,108 @@ from io import StringIO
 from datetime import datetime, timedelta
 
 # --- CONFIG ---
-st.set_page_config(page_title="Hybrid Pro Coach V7", layout="wide")
-
-# --- CUSTOM CSS VOOR DARK MODE ---
-st.markdown("""
-<style>
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { border-radius: 4px; padding: 10px; }
-    .coach-box { padding: 20px; border-radius: 10px; border-left: 5px solid #FF4B4B; background-color: rgba(255, 75, 75, 0.1); margin-bottom: 20px; }
-    .info-box { padding: 20px; border-radius: 10px; border-left: 5px solid #00C0F2; background-color: rgba(0, 192, 242, 0.1); margin-bottom: 20px; }
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="Hybrid Coach Pro V8", layout="wide")
 
 # --- INITIALISATIE ---
 if 'logs' not in st.session_state:
     st.session_state.logs = pd.DataFrame(columns=['Datum', 'Type', 'KM', 'Duur', 'HR', 'RunningIndex', 'Pijn', 'Gewicht', 'Ratio'])
 
-# --- SIDEBAR ---
-st.sidebar.header("🛡️ Status")
-curr_weight = st.sidebar.number_input("Gewicht (kg)", value=76.0)
+# --- SIDEBAR & ZONES ---
+st.sidebar.header("🛡️ Coach Dashboard")
+curr_weight = st.sidebar.number_input("Huidig Gewicht (kg)", value=76.0)
 injury_score = st.sidebar.slider("Achilles Pijn (0-10)", 0, 10, 0)
-st.sidebar.divider()
-st.sidebar.write("**Z2 Range:** 125 - 140 bpm")
 
-# --- LOGICA: KM & RATIO PROGRESSIE ---
-today = datetime.now()
-last_week_date = today - timedelta(days=7)
+# Jouw specifieke zones
+z_info = {
+    "Z1 (Herstel)": "90 - 124 bpm",
+    "Z2 (Basis)": "125 - 140 bpm",
+    "Z3 (Tempo)": "141 - 155 bpm",
+    "Z4 (Threshold)": "156 - 175 bpm",
+    "Z5 (Max)": "176 - 199 bpm"
+}
 
-if not st.session_state.logs.empty:
-    st.session_state.logs['Datum'] = pd.to_datetime(st.session_state.logs['Datum'])
-    last_week_runs = st.session_state.logs[(st.session_state.logs['Datum'] > last_week_date) & (st.session_state.logs['Type'] == 'RUNNING')]
-    last_week_vol = last_week_runs['KM'].sum() if not last_week_runs.empty else 22.0
-else:
-    last_week_vol = 22.0
+# --- LOGICA: PACES BEREKENEN OP RI ---
+runs = st.session_state.logs[st.session_state.logs['Type'] == 'RUNNING']
+current_ri = runs['RunningIndex'].tail(5).mean() if not runs.empty else 57.0
 
-week_limit = round(last_week_vol * 1.1, 1)
-current_ratio = "10:1" if injury_score <= 1 else "9:1"
+# 5K pace schatting in sec/km
+five_k_pace_sec = (26 - (current_ri - 50) * 0.5) * 60 / 5 
+z2_pace_sec = five_k_pace_sec * 1.35
+threshold_pace_sec = five_k_pace_sec * 1.08
+interval_400_sec = (five_k_pace_sec * 0.95) * 0.4
+
+def format_pace(seconds):
+    return f"{int(seconds//60)}:{int(seconds%60):02d} min/km"
 
 # --- TABS ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚀 Coach", "📅 Roadmap", "💪 Kracht (A-D)", "📈 Progressie", "📂 Data"])
+tabs = st.tabs(["🚀 Coach", "🔮 Toekomst Planner", "💪 Kracht (A-D)", "📈 Progressie", "📂 Data"])
 
-with tab1:
-    st.header(f"Plan voor {today.strftime('%d %B')}")
-    st.markdown(f"""
-    <div class="coach-box">
-        <h3>🚀 Bouw Week: Aerobe Flow</h3>
-        <p><b>Hardloop Protocol:</b> <span style='color:#FF4B4B; font-weight:bold;'>{current_ratio}</span> (Focus op relaxte ademhaling)</p>
-        <p><b>Weeklimiet:</b> {week_limit} km | <b>Dagdoel:</b> ± {round(week_limit/3, 1)} km</p>
-    </div>
-    """, unsafe_allow_html=True)
+with tabs[0]:
+    st.header(f"Focus voor {datetime.now().strftime('%d %B')}")
+    st.info(f"**Jouw Sub-18 Threshold:** {format_pace(threshold_pace_sec)} | **Zone 2 Tempo:** {format_pace(z2_pace_sec)}")
     
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Training Vandaag")
+        st.success(f"9:1 Lydiard Run | Range: {z_info['Z2 (Basis)']} | Afstand: {round(24/3,1)} km")
+    with col2:
+        st.subheader("Doel")
+        st.write("Versterken van de pees-matrix en vergroten van de linker hartkamer.")
+
+with tabs[1]:
+    st.header("📅 4-Weken Roadmap (Interfereert met Volume & Intensiteit)")
+    
+    # Volume berekening
+    base_vol = 24.0 # Startwaarde
+    
+    for w in range(1, 5):
+        is_del = (w == 4)
+        vol = base_vol * (1.1 ** (w-1)) if not is_del else base_vol * 1.1**2 * 0.7
+        type_w = "BOUWWEEK" if not is_del else "DELOAD (Herstel)"
+        
+        with st.expander(f"Week {w}: {type_w} - Target: {vol:.1f} km"):
+            st.write(f"**Focus:** {'Progressie in kilometers' if not is_del else 'Supercompensatie'}")
+            
+            day_data = {
+                "Dag": ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"],
+                "Sessie": ["🚲 Fiets Z1", "🏃 Run Z2", "💪 Kracht A", "🏃 Run Z2", "🚲 Fiets Z1", "🏃 Lange Loop", "💪 Kracht B"],
+                "Target": ["45 min", f"{vol*0.25:.1f} km", "Stability", f"{vol*0.25:.1f} km", "45 min", f"{vol*0.5:.1f} km", "Power"]
+            }
+            st.table(pd.DataFrame(day_data))
+            
+            st.markdown("---")
+            st.write("**Uitleg per sessie:**")
+            st.write("- **Run Z2:** Het fundament. Doel: Mitochondriële dichtheid verhogen.")
+            st.write("- **Fiets Z1:** 'Flushing'. Afvalstoffen uit de benen fietsen zonder impact.")
+            st.write(f"- **Interval Preview (voor later):** Bijv. 10x400m op **{int(interval_400_sec//60)}:{(interval_400_sec%60):02.0f} min/km**.")
+
+with tabs[2]:
+    st.header("💪 Kracht Roulatie (A-D)")
     c1, c2 = st.columns(2)
     with c1:
-        st.subheader("Diesel Status: Bevestigd")
-        st.write("Jouw RI stijgt bij langere sessies. Dit betekent dat je efficiënter wordt naarmate de run vordert. Focus op een hele rustige eerste 2km.")
+        with st.expander("Sessie A (Stability)"): st.write("- Single Leg RDL, Isometric Calf Raise, Tibialis Raise")
+        with st.expander("Sessie B (Upper)"): st.write("- Pull-ups, Dips, Barbell Row")
     with c2:
-        st.subheader("Mobiliteit van de dag")
-        st.info("Tibialis Raises: 3 x 20 herhalingen (tegen een muur staan, tenen optrekken). Dit ontlast je achillespees direct.")
+        with st.expander("Sessie C (Force)"): st.write("- Goblet Squat, Bulgarian Split Squat, KB Swings")
+        with st.expander("Sessie D (Core)"): st.write("- Ab-Roller, Plank, Mobility Board")
 
-with tab2:
-    st.header("📅 Roadmap naar 31 December")
-    st.write("Fase 1: Aerobe Fundering (Continuïteit bouwen)")
-    roadmap = pd.DataFrame({
-        "Periode": ["Nu - Mei", "Juni - Juli", "Aug - Sept", "Okt - Nov", "December"],
-        "Focus": ["Ratio naar 20:1", "Continu lopen", "Lydiard Heuvels", "Anaerobe Snelheid", "Taper & PR"],
-        "KM per week": ["22 - 30 km", "30 - 45 km", "40 - 50 km", "45 - 55 km", "Race Prep"]
-    })
-    st.table(roadmap)
-
-with tab3:
-    st.header("💪 Expanded Strength Rotation")
-    st.info("Voer de oefeningen beheerst uit. Bij kracht: focus op de spier, niet op het gooien van gewicht.")
+with tabs[3]:
+    st.header("📈 AI Analyse & Voorspelling")
+    col_z1, col_z2 = st.columns(2)
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        with st.expander("🦵 Sessie A: Legs (Posterior Chain & Enkel Control)"):
-            st.write("1. **Single Leg RDL:** 3 x 12 (KB)")
-            st.write("2. **Barbell Good Mornings:** 3 x 12 (Licht/40kg)")
-            st.write("3. **Isometric Calf Raise:** 5 x 45s (Houd vast op board)")
-            st.write("4. **Tibialis Raises:** 3 x 20 (Lichaamsgewicht)")
-            st.write("5. **Glute Bridges:** 3 x 20 (Eventueel met gewicht op heupen)")
-            st.write("6. **Copenhagen Plank:** 3 x 30s per kant (Lies-sterkte)")
+    with col_z1:
+        st.subheader("Jouw Zones & Threshold")
+        for z, r in z_info.items():
+            st.write(f"**{z}:** `{r}`")
+        st.warning(f"**Anarobe Threshold:** {format_pace(threshold_pace_sec)} @ ~165 bpm")
+        
+    with col_z2:
+        st.subheader("PR Voorspelling")
+        st.metric("Verwachte 5K tijd", f"{int(pred_5k)}:{(pred_5k%1*60):02.0f} min")
+        st.write("Om Sub-18 te halen moet je Running Index naar 65.")
 
-        with st.expander("👕 Sessie B: Upper Body (Hyrox Power & Push/Pull)"):
-            st.write("1. **Weighted Pull-ups:** 4 x Max")
-            st.write("2. **Dips:** 4 x Max")
-            st.write("3. **Barbell Row:** 4 x 10 (40kg)")
-            st.write("4. **Overhead Press:** 3 x 12 (Barbell)")
-            st.write("5. **Diamond Push-ups:** 3 x Max (Parallettes)")
-            st.write("6. **Band Face Pulls:** 3 x 20 (Houding/Schouders)")
-
-    with col_b:
-        with st.expander("🦵 Sessie C: Legs (Quad Dominant & Explosief)"):
-            st.write("1. **Goblet Squat:** 4 x 12 (20kg KB)")
-            st.write("2. **Bulgarian Split Squat:** 3 x 10 per been (Focus op diepte)")
-            st.write("3. **KB Swings:** 4 x 20 (Explosieve heupinzet)")
-            st.write("4. **Walking Lunges:** 3 x 20 stappen (DBs in handen)")
-            st.write("5. **Explosive Calf Raises:** 3 x 15 (Snel omhoog, 3 sec omlaag)")
-            st.write("6. **Wall Sit:** 3 x 60 seconden")
-
-        with st.expander("⚖️ Sessie D: Core & Hybrid Stability"):
-            st.write("1. **Ab-Roller:** 4 x 12")
-            st.write("2. **Russian Twists:** 3 x 40 (KB)")
-            st.write("3. **Deadbugs:** 3 x 15 (Langzaam en gecontroleerd)")
-            st.write("4. **Hanging Leg Raises:** 3 x 12 (Aan de optrekstang)")
-            st.write("5. **Plank with Shoulder Taps:** 3 x 60s")
-            st.write("6. **Mobility Board Enkel Stretch:** 10 min actieve stretch")
-
-with tab4:
-    st.header("📈 Voortgang")
-    runs = st.session_state.logs[st.session_state.logs['Type'] == 'RUNNING']
-    if not runs.empty:
-        curr_ri = runs['RunningIndex'].tail(5).mean()
-        pred_5k = 26 - (curr_ri - 50) * 0.5
-        m1, m2, m3 = st.columns(3)
-        m1.metric("5K Voorspelling", f"{int(pred_5k)}:{(pred_5k%1*60):02.0f} min")
-        m2.metric("Running Index", f"{curr_ri:.1f}")
-        m3.metric("Status", "Productief" if curr_ri > 55 else "Opbouwend")
-        st.plotly_chart(px.line(runs, x='Datum', y='RunningIndex', title="Running Index Trend", markers=True), use_container_width=True)
-    else:
-        st.info("Upload data om grafieken te zien.")
-
-with tab5:
-    st.header("📂 Data")
-    uploaded = st.file_uploader("Upload Polar Flow CSV", type="csv")
+with tabs[4]:
+    uploaded = st.file_uploader("Upload Polar CSV", type="csv")
     if uploaded:
         try:
             stringio = StringIO(uploaded.getvalue().decode("utf-8"))
@@ -139,10 +117,10 @@ with tab5:
                 'KM': round(float(df_raw.iloc[0]['Total distance (km)']), 2),
                 'Duur': df_raw.iloc[0]['Duration'], 'HR': int(df_raw.iloc[0]['Average heart rate (bpm)']),
                 'RunningIndex': int(ri) if pd.notnull(ri) else 0,
-                'Pijn': injury_score, 'Gewicht': curr_weight, 'Ratio': current_ratio
+                'Pijn': injury_score, 'Gewicht': curr_weight
             }
-            if st.button("Sessie Opslaan"):
+            if st.button("Opslaan"):
                 st.session_state.logs = pd.concat([st.session_state.logs, pd.DataFrame([new_data])], ignore_index=True)
                 st.success("Sessie opgeslagen!")
-        except: st.error("Fout bij inlezen.")
+        except: st.error("Upload mislukt.")
     st.dataframe(st.session_state.logs.sort_values('Datum', ascending=False), use_container_width=True)
